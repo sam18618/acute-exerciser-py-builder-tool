@@ -9,7 +9,7 @@ that changes what the builder emits gets its own. **Breaking** marks a change
 to something the builder already offered; unless an entry says otherwise, a
 saved `.pxb.json` still opens and still generates the same script.
 
-## Unreleased
+## 1.0.1 — 2026-11-25
 
 ### Changed
 
