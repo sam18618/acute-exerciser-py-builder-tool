@@ -1,0 +1,12 @@
+# Development and build dependencies. The builder itself needs none of these --
+# it runs on the standard library alone (see "Requirements" in README.md).
+
+# Running the test suite.
+pytest==8.4.2
+
+# Building dist/PX_Py_Builder.exe from PX_Py_Builder.spec.
+pyinstaller==6.22.2
+
+# aqpxlib is deliberately not pinned here: the builder does not import it, and
+# the catalog tests are meant to run against whichever version you install.
+# pip install aqpxlib

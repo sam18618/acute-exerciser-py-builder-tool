@@ -1,0 +1,33 @@
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Scripts exported from the builder. They are the tool's output, not its source,
+# and they carry whatever bus timings the project was set to. Saved .pxb.json
+# projects are NOT ignored -- those are deliberate work.
+/exported/
+/*.py
+!run_builder.py
+
+# PyInstaller build output. dist/PX_Py_Builder.exe is a build product, not
+# source -- rebuild it from PX_Py_Builder.spec, which IS tracked.
+/build/
+/dist/
