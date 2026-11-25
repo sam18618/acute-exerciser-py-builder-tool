@@ -17,12 +17,24 @@ class ValueError_(ValueError):
     """Raised when typed text cannot be turned into a value."""
 
 
-def parse_int(text: str, *, label: str = "value") -> int:
-    """Parse a decimal, hex (0x..), binary (0b..) or octal (0o..) integer."""
+def parse_int(text: str, *, label: str = "value", hex_first: bool = False) -> int:
+    """Parse a decimal, hex (0x..), binary (0b..) or octal (0o..) integer.
+
+    ``hex_first`` reads a bare token as hex, for a field that is shown and
+    written back as hex: there ``10`` means 0x10, not ten. An explicit 0x, 0b
+    or 0o prefix is honoured either way.
+    """
     cleaned = text.strip().replace("_", "")
     if not cleaned:
         msg = f"{label} is empty"
         raise ValueError_(msg)
+    prefixed = cleaned[:2].lower() in ("0x", "0b", "0o")
+    if hex_first and not prefixed:
+        try:
+            return int(cleaned, 16)
+        except ValueError:
+            msg = f"{label}: {text!r} is not a hex number"
+            raise ValueError_(msg) from None
     try:
         # base=0 honours the 0x / 0b / 0o prefixes and rejects stray characters.
         return int(cleaned, 0)
@@ -36,18 +48,64 @@ def parse_int(text: str, *, label: str = "value") -> int:
         raise ValueError_(msg) from None
 
 
+def split_into_bytes(value: int) -> list[int]:
+    """Split a value wider than a byte into its bytes, most significant first.
+
+    A byte array is an array of bytes, so ``1234`` typed into one is the two
+    bytes 0x12 0x34 rather than a single 4660 that no byte array can hold.
+    """
+    if value < 0:
+        msg = f"{value} is negative, so it is not a byte sequence"
+        raise ValueError_(msg)
+    if value <= 0xFF:
+        return [value]
+    width = (value.bit_length() + 7) // 8
+    return list(value.to_bytes(width, "big"))
+
+
+def bytes_from_token(token: str, *, label: str = "list") -> list[int]:
+    """One token of a byte array, split into bytes most significant first.
+
+    The digits are taken two at a time, so ``0040`` is the two bytes 0x00 0x40
+    and not the one byte 0x40 its value would fit in -- the leading zero is a
+    byte on the wire. An odd count of digits is padded on the left: ``123`` is
+    0x01 0x23. A 0b or 0o token is split by value instead, having no hex digits
+    to pair up.
+    """
+    cleaned = token.strip().replace("_", "")
+    prefix = cleaned[:2].lower()
+    if prefix in ("0b", "0o"):
+        return split_into_bytes(parse_int(cleaned, label=label))
+    digits = cleaned[2:] if prefix == "0x" else cleaned
+    if not digits or any(c not in "0123456789abcdefABCDEF" for c in digits):
+        msg = f"{label}: {token!r} is not hex bytes"
+        raise ValueError_(msg)
+    if len(digits) % 2:
+        digits = "0" + digits
+    return [int(digits[i:i + 2], 16) for i in range(0, len(digits), 2)]
+
+
 def parse_int_list(text: str, *, label: str = "list") -> list[int | str]:
-    """Parse ``DE AD BE EF``, ``0xDE, 0xAD`` or ``[0xDE 0xAD]`` into ints.
+    """Parse ``DE AD BE EF``, ``0xDE, 0xAD`` or ``[0xDE 0xAD]`` into bytes.
 
     A token that is a CCC constant name (``I3C_CCC_...``) is kept as a string, so
     a frame can carry ``bytes([PxI3CCommonCommandCode.I3C_CCC_DIRECT_GETBCR])``
     rather than a bare number.
+
+    Everything else is hex, and is split a byte at a time, so ``0040``,
+    ``00 40`` and ``0x0040`` all give the same two bytes.
     """
     cleaned = text.strip().strip("[]()")
     if not cleaned:
         return []
     tokens = [t for t in cleaned.replace(",", " ").split() if t]
-    return [t if t.startswith("I3C_CCC_") else parse_int(t, label=label) for t in tokens]
+    values: list[int | str] = []
+    for token in tokens:
+        if token.startswith("I3C_CCC_"):
+            values.append(token)
+            continue
+        values.extend(bytes_from_token(token, label=label))
+    return values
 
 
 def parse_addr_pairs(text: str, *, label: str = "pairs") -> list[list[int]]:
@@ -163,7 +221,7 @@ def format_ccc_targets(value: list[dict[str, Any]] | None) -> str:
     for entry in value:
         address = format_hex(entry.get("address"))[2:]
         if entry.get("direction") == "read":
-            parts.append(f"{address}:r{int(entry.get('count', 1))}")
+            parts.append(f"{address}:r{format_hex(int(entry.get('count', 1)))[2:]}")
         else:
             payload = format_int_list(entry.get("data"))
             parts.append(f"{address}:w {payload}".rstrip())
@@ -189,14 +247,14 @@ def parse_ccc_targets(text: str, *, label: str = "targets") -> list[dict[str, An
             msg = f"{label}: {chunk!r} needs r (read) or w (write) after the colon"
             raise ValueError_(msg)
         entry: dict[str, Any] = {
-            "address": parse_int(address, label=label),
+            "address": parse_int(address, label=label, hex_first=True),
             "direction": "read" if rest[0] == "r" else "write",
             "count": 1,
             "data": [],
         }
         payload = rest[1:].strip()
         if entry["direction"] == "read":
-            entry["count"] = parse_int(payload or "1", label=label)
+            entry["count"] = parse_int(payload or "1", label=label, hex_first=True)
         else:
             entry["data"] = parse_int_list(payload, label=label)
         entries.append(entry)
@@ -231,7 +289,7 @@ def from_text(param: Param, text: str) -> Any:
                 msg = f"{param.label} is required"
                 raise ValueError_(msg)
             return None
-        return parse_int(stripped, label=param.label)
+        return parse_int(stripped, label=param.label, hex_first=param.type == "hex")
     if param.type in ("bytes", "bytes_literal", "int_list"):
         return parse_int_list(stripped, label=param.label)
     if param.type == "addr_pairs":
@@ -251,14 +309,14 @@ def from_text(param: Param, text: str) -> Any:
 def hint(param: Param) -> str:
     """A short example of the accepted input format, for the widget tooltip."""
     return {
-        "hex": "e.g. 0x08 or 08",
+        "hex": "hex, e.g. 0x08 or 08",
         "int": "decimal, blank = default" if not param.always_emit else "decimal",
-        "bytes": "e.g. DE AD BE EF",
-        "bytes_literal": "e.g. DE AD, or a CCC name",
+        "bytes": "hex bytes, e.g. DE AD BE EF",
+        "bytes_literal": "hex bytes, e.g. DE AD, or a CCC name",
         "int_list": "e.g. 08 09 0A",
         "addr_pairs": "e.g. 08>09, 0A>0B",
         "pairs": "e.g. 08: DE AD; 0A: BE EF",
         "byte_pairs": "defining byte: value, e.g. 00: 12 34; 01: AB",
-        "ccc_targets": "e.g. 08:r4, 09:w AA BB",
+        "ccc_targets": "hex, e.g. 08:r04, 09:w AA BB",
         "enum_flags": "tick none to use the library default",
     }.get(param.type, "")

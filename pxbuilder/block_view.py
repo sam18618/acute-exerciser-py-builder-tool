@@ -1009,8 +1009,24 @@ class BlockWorkspace(ttk.Frame):
     def _select_block(self, index: int) -> None:
         self.callbacks.select_node(f"tx:{self.step_index}:{index}")
 
+    def _take_key_focus(self) -> None:
+        """Put the keyboard on the stack, so Delete reaches the block keys.
+
+        Tk sends a key press to the focused widget and its bind tags, never to
+        an ancestor frame, so the <Delete> binding only fires while the stack
+        canvas itself holds the focus -- and clicking a block, which is a frame
+        that takes no focus, left it wherever it was.
+
+        An inline field is bound separately, so this runs only for a click on
+        the block itself, where claiming the focus is what was meant. It is
+        deliberately not called from apply_selection, which also runs on every
+        rebuild and would pull the focus out of a field being typed into.
+        """
+        self._stack_canvas.focus_set()
+
     def _block_press(self, index: int, event: tk.Event) -> None:
         self._select_block(index)
+        self._take_key_focus()
         spec = TRANSACTIONS.get(self.step.transactions[index].kind)
         label = spec.label if spec else self.step.transactions[index].kind
         fill, _edge = _colors(self.step.transactions[index].kind)
