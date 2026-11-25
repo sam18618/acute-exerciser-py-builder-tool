@@ -21,6 +21,7 @@ from pxbuilder import values  # noqa: E402
 from pxbuilder.catalog import (  # noqa: E402
     DEVICES,
     OPERATIONS,
+    Param,
     default_params,
     device_matches,
 )
@@ -245,6 +246,58 @@ def test_missing_device_is_reported() -> None:
 )
 def test_parse_int_list(text: str, expected: list[object]) -> None:
     assert values.parse_int_list(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # A byte array is an array of bytes: a token wider than one is split.
+        ("1234", [0x12, 0x34]),
+        ("0x1234", [0x12, 0x34]),
+        ("DEADBEEF", [0xDE, 0xAD, 0xBE, 0xEF]),
+        # Taken two digits at a time, so a leading zero stays a byte of its own
+        # -- 0x00 0x40 on the wire is not 0x40.
+        ("0040", [0x00, 0x40]),
+        ("0x0040", [0x00, 0x40]),
+        # An odd count of digits pads on the left.
+        ("123", [0x01, 0x23]),
+        # One byte each, as before.
+        ("10", [0x10]),
+        ("FF 00", [0xFF, 0x00]),
+    ],
+)
+def test_a_byte_array_splits_a_token_into_bytes(
+    text: str, expected: list[int],
+) -> None:
+    assert values.parse_int_list(text) == expected
+
+
+def test_byte_arrays_and_hex_fields_read_as_hex() -> None:
+    """The fields are shown as hex, so 10 in one of them is 0x10, not ten."""
+    address = Param("address", "Address", "hex", default=8, always_emit=True)
+    data = Param("data", "Data", "bytes", default=[], always_emit=True)
+
+    assert values.from_text(address, "10") == 0x10
+    assert values.from_text(address, "0x10") == 0x10
+    assert values.to_text(address, values.from_text(address, "20")) == "0x20"
+    assert values.from_text(data, "10 20") == [0x10, 0x20]
+
+    # A plain int field is still decimal: timings are given in nanoseconds.
+    nanoseconds = Param("low", "Low", "int", default=0, always_emit=True)
+    assert values.from_text(nanoseconds, "10") == 10
+
+
+def test_every_number_in_a_ccc_frame_is_hex() -> None:
+    """Addresses, command codes, payloads and counts in one base."""
+    for key in ("broadcast_ccc", "direct_ccc", "direct_ccc_write", "direct_ccc_read"):
+        for param in FRAMES[key].params:
+            assert param.type not in ("int", "int_list"), f"{key}.{param.name}"
+
+
+def test_a_hex_field_rejects_what_is_not_hex() -> None:
+    data = Param("data", "Data", "bytes", default=[], always_emit=True)
+    with pytest.raises(values.ValueError_):
+        values.from_text(data, "GG")
 
 
 def test_parse_addr_pairs() -> None:
@@ -995,6 +1048,54 @@ def test_every_named_send_works_as_a_block(key: str) -> None:
     script = _frame_of(_composite(key), _primitive("stop"))
     assert validate(script) == []
     ast.parse(generate(script))
+
+
+def test_a_broadcast_ccc_payload_follows_the_command_in_one_write() -> None:
+    """No repeated start between a broadcast CCC and its payload.
+
+    A write of its own for the payload repeats the address phase, which is a
+    repeated start back to 0x7E -- a second, payload-less CCC frame on the
+    wire rather than the one that was asked for.
+    """
+    script = _frame_of(
+        _composite("broadcast_ccc", ccc="I3C_CCC_BROADCAST_ENEC", data=[0x0B, 0x0C]),
+        _primitive("stop"),
+    )
+    source = generate(script)
+    ast.parse(source)
+
+    assert source.count("I3CSdrWrite(") == 1
+    assert source.count("address=0x7E") == 1
+    assert ("data=bytes([PxI3CCommonCommandCode.I3C_CCC_BROADCAST_ENEC, 0x0B, 0x0C])"
+            in source)
+
+
+def test_a_broadcast_ccc_without_a_payload_is_the_command_alone() -> None:
+    script = _frame_of(
+        _composite("broadcast_ccc", ccc="I3C_CCC_BROADCAST_SETAASA", data=[]),
+        _primitive("stop"),
+    )
+    source = generate(script)
+    ast.parse(source)
+    assert source.count("I3CSdrWrite(") == 1
+    assert ("data=bytes([PxI3CCommonCommandCode.I3C_CCC_BROADCAST_SETAASA])"
+            in source)
+
+
+def test_a_direct_ccc_keeps_its_repeated_start() -> None:
+    """The counterpart: a direct CCC does turn the bus around after the command.
+
+    0x7E and the command go out in open drain, then a repeated start addresses
+    the target in push-pull, so the two writes there are correct.
+    """
+    source = generate(_frame_of(
+        _composite("direct_ccc_write", ccc="I3C_CCC_DIRECT_SETNEWDA", address=0x08,
+                   data=[0x12]),
+        _primitive("stop"),
+    ))
+    ast.parse(source)
+    assert source.count("I3CSdrWrite(") == 2
+    assert "address=0x7E" in source and "address=0x08" in source
 
 
 def test_a_composite_emits_what_the_expanded_form_did() -> None:

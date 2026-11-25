@@ -4,10 +4,47 @@ What changed for someone using the builder — the fields, blocks, devices and
 menu entries, and the code they generate. Internal refactors and test-only work
 are not listed; `git log` has those.
 
-Each entry covers one aqpxlib version the builder was brought up to.
-**Breaking** marks a change to something the builder already offered; unless an
-entry says otherwise, a saved `.pxb.json` still opens and still generates the
-same script.
+Most entries cover one aqpxlib version the builder was brought up to; a fix
+that changes what the builder emits gets its own. **Breaking** marks a change
+to something the builder already offered; unless an entry says otherwise, a
+saved `.pxb.json` still opens and still generates the same script.
+
+## Unreleased
+
+### Changed
+
+- **Breaking** — every number in a **Direct CCC** or **Broadcast CCC** field is
+  **hex**, typed and shown. `10` in an address, a payload or a byte count now
+  means 0x10, where a bare number used to be read as decimal and then shown
+  back as hex — `10` became `0x0A`. The Byte count of a Direct CCC read is hex
+  too, so one base covers the whole form. Fields elsewhere are unchanged:
+  timings are still nanoseconds in decimal. Check any saved project whose CCC
+  fields hold a value between 10 and 99.
+- **Byte arrays are split a byte at a time.** A payload token wider than one
+  byte becomes one array entry per byte, taken two digits at a time: `1234`
+  generates `0x12, 0x34`, and `0040` generates `0x00, 0x40` rather than the
+  single `0x40` its value would fit in — a leading zero is a byte on the wire.
+  An odd count of digits pads on the left, so `123` is `0x01, 0x23`. A value
+  too wide for one byte used to reach the generated array whole, where it
+  would have been rejected when the script ran.
+
+### Fixed
+
+- **Pressing Delete with a block selected** removes it. The key was bound to
+  the workspace, but clicking a block left the keyboard focus wherever it had
+  been, and a key press never reaches an ancestor frame — so nothing happened
+  unless the stack happened to hold the focus already. Selecting a block now
+  claims it. Delete inside a field still edits the text, as before.
+
+- **Breaking** — a **Broadcast CCC** now sends its payload in the same write as
+  the command byte. It used to put the payload in a write of its own, which
+  repeated the address phase: on the wire that is a repeated start back to
+  0x7E, so the target saw a payload-less CCC followed by a second CCC frame
+  rather than one command carrying its data. Saved projects need no change, but
+  a Broadcast CCC **with** a payload now generates one `sdr_write` instead of
+  two, so re-export any script that used one. A Broadcast CCC without a payload
+  is unaffected, as are Direct CCCs, whose repeated start is correct — there it
+  turns the bus around to address the target.
 
 ## 2026-11-25 — aqpxlib 0.7.1 to 0.8.0
 

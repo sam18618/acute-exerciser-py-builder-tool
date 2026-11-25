@@ -1557,6 +1557,44 @@ def test_delete_removes_the_selected_block(app) -> None:
     assert len(app.script.steps[index].transactions) == before - 1
 
 
+def test_clicking_a_block_claims_the_key_focus(app, monkeypatch) -> None:
+    """Otherwise Delete never reaches the handler at all.
+
+    Tk delivers a key press to the focused widget and its bind tags, not to an
+    ancestor, and a block is a frame that takes no focus -- so selecting one
+    has to move the focus onto the widget that carries the binding.
+    """
+    _index, workspace = _workspace(app)
+    taken: list[bool] = []
+    monkeypatch.setattr(workspace._stack_canvas, "focus_set",
+                        lambda: taken.append(True))
+
+    workspace.blocks[0].event_generate("<Button-1>", x=2, y=2)
+    workspace.update()
+
+    assert taken, "a block click must claim the focus"
+    assert workspace._stack_canvas.bind("<Delete>"), (
+        "and the widget it claims it for must be the one handling Delete")
+
+
+def test_delete_acts_with_the_focus_on_the_stack(app, monkeypatch) -> None:
+    """The other half of the click: that focus is one the handler accepts.
+
+    A generated key press is not delivered at all in a window this suite never
+    maps, so the two halves are pinned either side of Tk's dispatch: the click
+    claims the focus for the bound widget above, and the handler acts on that
+    focus here.
+    """
+    index, workspace = _workspace(app)
+    before = len(app.script.steps[index].transactions)
+    app._selected_tx = 0
+    workspace.apply_selection(0)
+    monkeypatch.setattr(workspace, "focus_get", lambda: workspace._stack_canvas)
+
+    assert workspace._on_delete_key() == "break", "the key must be consumed"
+    assert len(app.script.steps[index].transactions) == before - 1
+
+
 def test_delete_does_nothing_with_no_block_selected(app) -> None:
     index, workspace = _workspace(app)
     before = len(app.script.steps[index].transactions)

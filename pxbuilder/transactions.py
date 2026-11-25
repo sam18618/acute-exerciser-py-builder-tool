@@ -332,18 +332,20 @@ def _defaults(keys: dict[str, Any], spec_key: str) -> dict[str, Any]:
 
 
 def _build_broadcast_ccc(p: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """0x7E + CCC in open drain, then the payload in push-pull, then STOP."""
-    frame: list[tuple[str, dict[str, Any]]] = [
+    """0x7E + CCC + payload in one write, then STOP.
+
+    The payload of a broadcast CCC follows the command byte in the same write.
+    Giving it a write of its own would repeat the address phase, which is a
+    repeated start back to 0x7E -- a second, payload-less CCC frame on the
+    wire, not the one that was asked for.
+    """
+    return [
         ("sdr_write", _defaults(
-            {"address": BROADCAST_ADDRESS, "data": [p["ccc"]],
+            {"address": BROADCAST_ADDRESS,
+             "data": [p["ccc"], *list(p.get("data") or [])],
              "address_header_policy": "OPEN_DRAIN_FAST"}, "sdr_write")),
+        ("stop", _defaults({"type": "PUSH_PULL"}, "stop")),
     ]
-    if p.get("data"):
-        frame.append(("sdr_write", _defaults(
-            {"address": BROADCAST_ADDRESS, "data": list(p["data"]),
-             "address_header_policy": "PUSH_PULL"}, "sdr_write")))
-    frame.append(("stop", _defaults({"type": "PUSH_PULL"}, "stop")))
-    return frame
 
 
 def _build_direct_ccc_write(p: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -594,7 +596,10 @@ FRAMES: dict[str, FrameSpec] = {
         params=[
             _ccc_param("I3C_CCC_DIRECT_GETBCR", direct=True),
             Param("address", "Target address", "hex", default=0x08, always_emit=True),
-            Param("count", "Byte count", "int", default=1, always_emit=True),
+            # Hex, like every other number in a CCC frame -- the frames mix
+            # addresses, command codes and payloads, and one base throughout
+            # is what keeps "10" from meaning two things in one form.
+            Param("count", "Byte count", "hex", default=1, always_emit=True),
         ],
         build=_build_direct_ccc_read,
     ),
