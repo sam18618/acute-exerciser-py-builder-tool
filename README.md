@@ -190,3 +190,8 @@ The builder is licensed; **aqpxlib is not**. This tool references its public
 API by name and generates code that calls it, but contains none of its source.
 You still need aqpxlib, on whatever terms it comes to you, to run anything this
 tool writes.
+
+PX Py Builder is an independent project, not affiliated with, endorsed by or
+sponsored by Acute Technology Inc. "Acute", "PX" and "aqpxlib" are that
+company's names for its own products, and appear here only to say what this
+tool works with.
