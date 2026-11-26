@@ -182,6 +182,17 @@ What each new version changed for someone using the builder is recorded in
   different shape from the linear step model and needs its own design.
 - I2C, SPI and UART protocols.
 
+## Issues and patches
+
+Bug reports and questions are welcome -- open an
+[issue](https://github.com/sam18618/acute-exerciser-py-builder-tool/issues), and
+say which aqpxlib version you are on and what the builder generated.
+
+Pull requests are not accepted. The catalog is written by hand against the
+library's API, and the test suite is what keeps the two in step, so a change is
+quicker to make here than to review. If something is wrong or missing, an issue
+is the way to get it fixed.
+
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE).
